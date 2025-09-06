@@ -8,7 +8,7 @@ terraform {
   }
 }
 
-# Configure the provider (example for AWS)
+# Configure the provider (example for AWS default us-east-1)
 provider "aws" {
   region = "us-east-1"
 }
