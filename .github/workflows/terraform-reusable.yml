@@ -1,0 +1,34 @@
+name: Reusable Terraform Workflow
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      region:
+        required: true
+        type: string
+      deploy:
+        required: true
+        type: boolean
+    secrets:
+      tf_token:
+        required: true
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Terraform Init
+        run: terraform init -backend-config="key=${{ inputs.app_name }}-${{ inputs.environment }}.tfstate"
+      - name: Terraform Plan
+        run: terraform plan -out=plan.tfout
+      - name: Terraform Apply (if deploy)
+        if: inputs.deploy
+        run: terraform apply plan.tfout

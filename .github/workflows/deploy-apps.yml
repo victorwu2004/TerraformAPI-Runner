@@ -1,0 +1,23 @@
+name: Deploy Multiple Apps
+
+on: [push]
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/terraform-reusable.yml
+    strategy:
+      matrix:
+        include:
+          - app_name: app1
+            environment: dev
+            region: us-east-1
+          - app_name: app2
+            environment: prod
+            region: us-west-2
+    with:
+      app_name: ${{ matrix.app_name }}
+      environment: ${{ matrix.environment }}
+      region: ${{ matrix.region }}
+      deploy: true
+    secrets:
+      tf_token: ${{ secrets.TF_TOKEN }}
