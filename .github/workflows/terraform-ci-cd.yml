@@ -5,9 +5,39 @@ on:
     branches: [main]
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: 'Branch to run on'
+        required: true
+        default: 'main'
+      message:
+        description: 'A custom message'
+        required: false
+        type: string
 
 jobs:
-  plan:
+  Terraform_Plan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Print event name and inputs
+        run: |
+          echo "Workflow triggered by ${{ github.event_name }}"
+          echo "Branch: ${{ github.event.inputs.branch_name }}"
+          echo "Message: ${{ github.event.inputs.message }}"
+      - uses: hashicorp/setup-terraform@v3
+      - name: Terraform Init
+        run: terraform init
+      - name: Terraform Plan
+        run: terraform plan -out=plan.tfout
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tf-plan
+          path: plan.tfout
+  plan_pull_request:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -23,7 +53,7 @@ jobs:
           name: tf-plan
           path: plan.tfout
 
-  apply:
+  apply_push:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: plan  # Optional if separating workflows
