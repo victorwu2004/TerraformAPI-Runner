@@ -15,5 +15,5 @@ provider "aws" {
 
 # Add a resource (example: an S3 bucket)
 resource "aws_s3_bucket" "example" {
-  bucket = "my-unique-bucket-name"
+  bucket = "my-s3-bucket-test"
 }

@@ -1,0 +1,143 @@
+To set AWS access keys in a GitHub Actions workflow for use with Terraform, you should securely store the keys as **GitHub Secrets** and configure your workflow to use them as environment variables. This approach avoids hardcoding sensitive credentials in your workflow files. Below are the steps to set up AWS access keys in a GitHub Actions workflow, along with best practices for security.
+
+### Steps to Set AWS Access Keys in a GitHub Actions Workflow
+
+1. **Create AWS Access Keys**:
+   - In the AWS Management Console, navigate to **IAM > Users > Your User > Security credentials**.
+   - Create a new access key under **Access keys** and note the **Access Key ID** and **Secret Access Key**.
+   - Ensure the IAM user has the necessary permissions for the Terraform resources (e.g., `AmazonS3FullAccess` for S3 buckets).
+
+2. **Store AWS Keys as GitHub Secrets**:
+   - Go to your GitHub repository.
+   - Navigate to **Settings > Secrets and variables > Actions > Secrets**.
+   - Click **New repository secret** and add the following secrets:
+     - Name: `AWS_ACCESS_KEY_ID`, Value: `YOUR_ACCESS_KEY_ID`
+     - Name: `AWS_SECRET_ACCESS_KEY`, Value: `YOUR_SECRET_ACCESS_KEY`
+   - Optionally, add a secret for the AWS region:
+     - Name: `AWS_DEFAULT_REGION`, Value: `us-east-1` (or your preferred region).
+   - Save the secrets.[](https://www.geeksforgeeks.org/devops/setting-aws-credentials-in-github-actions/)
+
+3. **Configure the GitHub Actions Workflow**:
+   - Create or edit a workflow file in your repository (e.g., `.github/workflows/terraform.yml`).
+   - Use the `aws-actions/configure-aws-credentials` action to set up AWS credentials, or directly set environment variables for Terraform.
+   - Example workflow:
+     ```yaml
+     name: Terraform Deployment
+     on:
+       push:
+         branches:
+           - main
+     jobs:
+       terraform:
+         runs-on: ubuntu-latest
+         steps:
+           # Checkout the repository
+           - name: Checkout code
+             uses: actions/checkout@v4
+
+           # Install Terraform
+           - name: Setup Terraform
+             uses: hashicorp/setup-terraform@v3
+             with:
+               terraform_version: 1.9.5  # Specify your Terraform version
+
+           # Configure AWS credentials
+           - name: Configure AWS Credentials
+             uses: aws-actions/configure-aws-credentials@v4
+             with:
+               aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+               aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+               aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
+
+           # Initialize Terraform
+           - name: Terraform Init
+             run: terraform init
+
+           # Run Terraform Plan
+           - name: Terraform Plan
+             run: terraform plan -out=tfplan
+
+           # Apply Terraform changes
+           - name: Terraform Apply
+             run: terraform apply -auto-approve tfplan
+     ```
+   - **Explanation**:
+     - The `aws-actions/configure-aws-credentials` action sets the AWS credentials as environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`) for subsequent steps.[](https://cicube.io/workflow-hub/githubs-actions-aws-credentials/)[](https://deepwiki.com/aws-actions/configure-aws-credentials/2-installation-and-usage)
+     - Terraform automatically uses these environment variables to authenticate with AWS.
+     - The `hashicorp/setup-terraform` action installs Terraform on the GitHub Actions runner.
+
+4. **Terraform Configuration**:
+   - Ensure your Terraform provider block does not hardcode credentials:
+     ```hcl
+     terraform {
+       required_providers {
+         aws = {
+           source  = "hashicorp/aws"
+           version = "~> 5.0"
+         }
+       }
+     }
+
+     provider "aws" {
+       region = "us-east-1"  # Matches AWS_DEFAULT_REGION secret
+     }
+
+     resource "aws_s3_bucket" "example" {
+       bucket = "my-unique-bucket-name-123"
+     }
+     ```
+   - Terraform will use the credentials provided by the `aws-actions/configure-aws-credentials` action.
+
+5. **Test the Workflow**:
+   - Push your changes to the repository to trigger the workflow.
+   - Check the workflow logs in the **Actions** tab of your GitHub repository to verify it runs without errors.
+   - If errors occur, ensure the secrets are correctly named and the IAM user has the required permissions.
+
+### Best Practices (Security Recommendations)
+- **Avoid Hardcoding Credentials**: Never include `access_key` or `secret_key` in your `.tf` or `.yml` files, as they could be exposed in version control.[](https://github.com/contentsquare-sec/aws-actions-configure-aws-credentials/blob/main/README.md)
+- **Use OIDC Instead of Access Keys** (Preferred for Security):
+  - Instead of static access keys, configure GitHub Actions to use **OpenID Connect (OIDC)** with an AWS IAM role for temporary credentials. This eliminates the need to manage long-lived access keys.
+  - Steps for OIDC:
+    1. Create an IAM OIDC Identity Provider in AWS for GitHub (`https://token.actions.githubusercontent.com`, audience: `sts.amazonaws.com`).[](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws)
+    2. Create an IAM role with a trust policy allowing GitHub Actions to assume it:
+       ```json
+       {
+         "Version": "2012-10-17",
+         "Statement": [
+           {
+             "Effect": "Allow",
+             "Principal": {
+               "Federated": "arn:aws:iam::YOUR_AWS_ACCOUNT_ID:oidc-provider/token.actions.githubusercontent.com"
+             },
+             "Action": "sts:AssumeRoleWithWebIdentity",
+             "Condition": {
+               "StringEquals": {
+                 "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                 "token.actions.githubusercontent.com:sub": "repo:YOUR_GITHUB_ORG/YOUR_REPO:ref:refs/heads/main"
+               }
+             }
+           }
+         ]
+       }
+       ```
+    3. Attach the necessary IAM policies to the role.
+    4. Update the workflow to use OIDC:
+       ```yaml
+       - name: Configure AWS Credentials
+         uses: aws-actions/configure-aws-credentials@v4
+         with:
+           role-to-assume: arn:aws:iam::YOUR_AWS_ACCOUNT_ID:role/YOUR_ROLE_NAME
+           aws-region: us-east-1
+       ```
+    - This approach is more secure as it uses short-lived credentials and eliminates the need to store access keys.[](https://aws.amazon.com/blogs/security/use-iam-roles-to-connect-github-actions-to-actions-in-aws/)[](https://docs.github.com/en/actions/how-tos/secure-your-work/security-harden-deployments/oidc-in-aws)[](https://devopscube.com/github-actions-oidc-aws/)
+- **Least Privilege**: Grant the IAM user or role only the permissions needed for your Terraform resources (e.g., `s3:CreateBucket` for S3).[](https://github.com/contentsquare-sec/aws-actions-configure-aws-credentials/blob/main/README.md)
+- **Rotate Keys**: If using access keys, rotate them regularly in the AWS Console and update the GitHub Secrets.[](https://alexanderhose.com/how-to-securely-connect-github-actions-to-aws/)
+- **Monitor Activity**: Use AWS CloudTrail to monitor API calls made by the GitHub Actions workflow.
+
+### Troubleshooting
+- **Secrets Not Found**: Ensure the secret names in the workflow (`${{ secrets.AWS_ACCESS_KEY_ID }}`) match the names in GitHub Secrets exactly.
+- **Permission Errors**: Verify the IAM user or role has the correct permissions for the Terraform resources.
+- **Region Mismatch**: Ensure `AWS_DEFAULT_REGION` matches the region in your Terraform provider block.
+- **Verbose Logging**: Add `-debug` to Terraform commands or check GitHub Actions logs for detailed errors.
+
+If you need help setting up OIDC, debugging a specific error, or configuring a particular AWS resource with Terraform, let me know!

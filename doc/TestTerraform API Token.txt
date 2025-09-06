@@ -1,0 +1,143 @@
+### Using GitHub Actions to Call Terraform Workflows and Make Them Reusable for Multiple App Infrastructure Deployments
+
+GitHub Actions allows you to automate Terraform workflows for infrastructure as code (IaC) deployments. To make a Terraform workflow reusable across multiple apps, you can leverage GitHub's reusable workflows feature. This involves defining a central workflow file (e.g., `.github/workflows/terraform-reusable.yml`) that can be called by other workflows using the `workflow_call` trigger. Parameterize it with inputs like app name, environment, region, or deployment directory to handle variations without duplicating code.
+
+#### Key Steps for Reusability:
+1. **Organize Your Repository**: Structure your Terraform code with reusable modules (e.g., in a `modules/` directory for common resources like networks or databases) and deployment-specific configurations (e.g., in `deployments/app1/`, `deployments/app2/`). This allows the same workflow to target different apps by changing the working directory or variables.
+
+2. **Define a Reusable Workflow**: Create a workflow file that handles Terraform commands (init, validate, plan, apply) and accepts inputs for customization. Use GitHub secrets for sensitive data like cloud credentials.
+
+3. **Call the Workflow**: In caller workflows (e.g., for specific apps or events), use `uses: ./.github/workflows/terraform-reusable.yml@main` with `with:` to pass inputs. For multiple apps, employ a matrix strategy to run the workflow in parallel or sequentially across different configurations.
+
+4. **Handle Multiple Environments/Apps**: Use inputs like `app_name`, `environment` (e.g., dev, test, prod), and `region` to generate unique Terraform workspaces or backend keys. This ensures isolated state files for each app/deployment.
+
+Example from an AWS-focused reusable workflow:
+```yaml
+# .github/workflows/terraform-reusable.yml (simplified example)
+name: Reusable Terraform Workflow
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        required: true
+        type: string
+      environment:
+        required: true
+        type: string
+      region:
+        required: true
+        type: string
+      deploy:
+        required: true
+        type: boolean
+    secrets:
+      tf_token:
+        required: true
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Terraform Init
+        run: terraform init -backend-config="key=${{ inputs.app_name }}-${{ inputs.environment }}.tfstate"
+      - name: Terraform Plan
+        run: terraform plan -out=plan.tfout
+      - name: Terraform Apply (if deploy)
+        if: inputs.deploy
+        run: terraform apply plan.tfout
+```
+
+Caller workflow for multiple apps using matrix:
+```yaml
+# .github/workflows/deploy-apps.yml
+name: Deploy Multiple Apps
+
+on: [push]
+
+jobs:
+  deploy:
+    uses: ./.github/workflows/terraform-reusable.yml
+    strategy:
+      matrix:
+        include:
+          - app_name: app1
+            environment: dev
+            region: us-east-1
+          - app_name: app2
+            environment: prod
+            region: us-west-2
+    with:
+      app_name: ${{ matrix.app_name }}
+      environment: ${{ matrix.environment }}
+      region: ${{ matrix.region }}
+      deploy: true
+    secrets:
+      tf_token: ${{ secrets.TF_TOKEN }}
+```
+
+This setup makes the workflow reusable by parameterizing app-specific details, allowing deployments for many apps without code duplication. For Azure or other clouds, adapt the backend config (e.g., using storage accounts) and variables like `client_name` or `project_name` to tag resources uniquely.
+
+### Separating Plan and Deploy as Different Tasks in the Terraform Workflow
+
+To separate `terraform plan` (preview changes) and `terraform apply` (deploy changes) into distinct tasks, use separate jobs or workflows in GitHub Actions. A common pattern is:
+- Run `plan` automatically on pull requests (PRs) for review, posting the output as a PR comment.
+- Run `apply` on push to main (after merge) or via manual approval for safety.
+
+This promotes collaboration and reduces risks by requiring human review before deployment.
+
+#### Key Steps:
+1. **Workflow Triggers**: Use `on: pull_request` for plan and `on: push` (to main) for apply. Alternatively, combine in one workflow with conditional logic.
+
+2. **Jobs Separation**: Define a `plan` job that generates and uploads the plan file (e.g., as an artifact). Then, a `apply` job that downloads and applies it, perhaps gated by an environment approval.
+
+3. **Security and Reuse**: Use actions like `hashicorp/setup-terraform` and store plans securely (e.g., encrypted). For reusability, integrate this into the reusable workflow above by adding an input like `command: plan` or `command: apply`.
+
+Example setup with separate plan on PR and apply on push:
+```yaml
+# .github/workflows/terraform-ci-cd.yml
+name: Terraform CI/CD
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  plan:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Terraform Init
+        run: terraform init
+      - name: Terraform Plan
+        run: terraform plan -out=plan.tfout
+      - name: Upload Plan Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tf-plan
+          path: plan.tfout
+
+  apply:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    needs: plan  # Optional if separating workflows
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - name: Download Plan Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: tf-plan
+      - name: Terraform Init
+        run: terraform init
+      - name: Terraform Apply
+        run: terraform apply plan.tfout
+```
+
+For added safety, use GitHub Environments for manual approvals on the apply job (e.g., `environment: production`). If using a reusable workflow, pass a `command` input to toggle between plan and apply. This pattern ensures plan is a read-only preview task, while deploy is an execution task, reusable across apps by combining with the matrix strategy above.
