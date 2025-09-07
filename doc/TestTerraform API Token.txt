@@ -61,7 +61,10 @@ jobs:
   deploy:
     uses: ./.github/workflows/terraform-reusable.yml
     strategy:
-      matrix:
+	  matrix:
+        app_name: ["frontend", "backend"]  # List of application names
+        environment: ["dev", "prod"]       # List of environments
+        region: ["us-east-1", "us-west-2"] # List of AWS regions
         include:
           - app_name: app1
             environment: dev

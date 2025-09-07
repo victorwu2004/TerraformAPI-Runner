@@ -7,13 +7,16 @@ jobs:
     uses: ./.github/workflows/terraform-reusable.yml
     strategy:
       matrix:
-        include:
-          - app_name: app1
-            environment: dev
-            region: us-east-1
-          - app_name: app2
-            environment: prod
-            region: us-west-1
+        app_name: ["frontend", "backend"]  # List of application names
+        environment: ["dev"]       # List of environments
+        region: ["us-east-1"] # List of AWS regions
+        # include:
+          # - app_name: app1
+            # environment: dev
+            # region: us-east-1
+          # - app_name: app2
+            # environment: prod
+            # region: us-west-1
     with:
       app_name: ${{ matrix.app_name }}
       environment: ${{ matrix.environment }}
