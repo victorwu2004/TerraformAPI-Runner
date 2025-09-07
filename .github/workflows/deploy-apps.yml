@@ -20,4 +20,4 @@ jobs:
       region: ${{ matrix.region }}
       deploy: true
     secrets:
-      tf_token: ${{ secrets.TF_TOKEN }}
+      tf_token: ${{ secrets.TERRAFORMAPI_TESTTOKEN }}
