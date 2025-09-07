@@ -13,7 +13,7 @@ jobs:
             region: us-east-1
           - app_name: app2
             environment: prod
-            region: us-west-2
+            region: us-west-1
     with:
       app_name: ${{ matrix.app_name }}
       environment: ${{ matrix.environment }}
