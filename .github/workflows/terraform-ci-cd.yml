@@ -2,9 +2,13 @@ name: Terraform CI/CD
 
 on:
   pull_request:
-    branches: [main]
+    branches: 
+      - main
+      - Develop
   push:
-    branches: [main]
+    branches:
+      - main
+      - Develop
   workflow_dispatch:
     inputs:
       branch_name:
@@ -71,6 +75,7 @@ jobs:
           path: plan.tfout
 
   apply_push:
+    # "Workflow was triggered by a push."
     if: github.event_name == 'release' || github.event_name == 'push'
     runs-on: ubuntu-latest
     needs: plan_pull_request  # Optional if separating workflows
