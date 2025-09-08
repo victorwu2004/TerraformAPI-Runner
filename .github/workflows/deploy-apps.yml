@@ -40,7 +40,7 @@ jobs:
           echo "Deploying ${{ matrix.app_name }} to ${{ matrix.environment }} in ${{ matrix.region }}"
 
       - name: Call Reusable Terraform Workflow
-        uses: ./.github/workflows/terraform-reusable.yml
+        uses: ./terraform-reusable.yml
         with:
           app_name: ${{ matrix.app_name }}
           environment: ${{ matrix.environment }}
