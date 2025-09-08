@@ -4,38 +4,61 @@ on:
   workflow_call:
     inputs:
       app_name:
+        description: 'Name of the application'
         required: true
         type: string
       environment:
+        description: 'Deployment environment (e.g., dev, prod)'
         required: true
         type: string
       region:
+        description: 'AWS region for deployment'
         required: true
         type: string
-      deploy:
-        required: true
-        type: boolean
+      terraform_version:
+        description: 'Terraform version to use'
+        required: false
+        type: string
+        default: '1.9.5'
     secrets:
-      tf_token:
-        required: true
+      AWS_ACCESS_KEY_ID:
+        description: 'AWS Access Key ID'
+        required: false
+      AWS_SECRET_ACCESS_KEY:
+        description: 'AWS Secret Access Key'
+        required: false
+      AWS_ROLE_ARN:
+        description: 'AWS IAM Role ARN for OIDC (optional)'
+        required: false
 
 jobs:
   terraform:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: hashicorp/setup-terraform@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ inputs.terraform_version }}
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_DEFAULT_REGION }}
-         
+#         role-to-assume: ${{ secrets.AWS_ROLE_ARN }}  # Optional for OIDC
+          aws-region: ${{ inputs.region }}  #${{ secrets.AWS_DEFAULT_REGION }}
+          
       - name: Terraform Init
-        run: terraform init -backend-config="key=${{ inputs.app_name }}-${{ inputs.environment }}.tfstate"
+        run: terraform init
+        env:
+          TF_LOG: DEBUG
+
       - name: Terraform Plan
-        run: terraform plan -out=plan.tfout
-      - name: Terraform Apply (if deploy)
-        if: inputs.deploy
-        run: terraform apply plan.tfout
+        run: terraform plan -var="app_name=${{ inputs.app_name }}" -var="environment=${{ inputs.environment }}" -var="aws_region=${{ inputs.region }}" -out=tfplan
+
+      - name: Terraform Apply
+        if: github.event_name == 'push'  # Only apply on push, not PR
+        run: terraform apply -auto-approve tfplan

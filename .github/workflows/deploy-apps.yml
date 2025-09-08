@@ -1,26 +1,161 @@
-name: Deploy Multiple Apps
+name: Deploy Terraform Apps
 
-on: [push]
+on:
+  push:
+    branches:
+      - main
+      - Develop
+      - Reusable_Template
+  pull_request:
+    branches:
+      - main
 
 jobs:
   deploy:
-    uses: ./.github/workflows/terraform-reusable.yml
+    runs-on: ubuntu-latest
     strategy:
       matrix:
-        app_name: ["frontend", "backend"]  # List of application names
-        environment: ["dev"]       # List of environments
-        region: ["us-east-1"] # List of AWS regions
+        app_name: ["frontend", "backend"]
+        environment: ["dev", "prod"]
+        region: ["us-east-1", "us-west-2"]
+        # Optional: Limit combinations with include
+        include:
+          - app_name: "frontend"
+            environment: "dev"
+            region: "us-east-1"
+          - app_name: "frontend"
+            environment: "prod"
+            region: "us-west-2"
+          - app_name: "backend"
+            environment: "dev"
+            region: "us-east-1"
+          - app_name: "backend"
+            environment: "prod"
+            region: "us-west-2"
+      fail-fast: false  # Continue other matrix jobs if one fails
+
+    steps:
+      - name: Debug Matrix Variables
+        run: |
+          echo "Deploying ${{ matrix.app_name }} to ${{ matrix.environment }} in ${{ matrix.region }}"
+
+      - name: Call Reusable Terraform Workflow
+        uses: ./.github/workflows/terraform-reusable.yml
+        with:
+          app_name: ${{ matrix.app_name }}
+          environment: ${{ matrix.environment }}
+          region: ${{ matrix.region }}
+          terraform_version: '1.9.5'
+        secrets:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#          AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}  # Optional for OIDC
+          
+#####
+# name: Deploy Terraform Apps
+
+# on:
+  # push:
+    # branches:
+      # - main
+  # pull_request:
+    # branches:
+      # - main
+
+# jobs:
+  # deploy:
+    # runs-on: ubuntu-latest
+    # strategy:
+      # matrix:
+        # app_name: ["frontend", "backend"]  # Application names
+        # environment: ["dev", "prod"]       # Environments
+        # region: ["us-east-1", "us-west-2"] # AWS regions
+        # # Optional: Use include to limit combinations
         # include:
-          # - app_name: app1
-            # environment: dev
-            # region: us-east-1
-          # - app_name: app2
-            # environment: prod
-            # region: us-west-1
-    with:
-      app_name: ${{ matrix.app_name }}
-      environment: ${{ matrix.environment }}
-      region: ${{ matrix.region }}
-      deploy: true
-    secrets:
-      tf_token: ${{ secrets.TERRAFORMAPI_TESTTOKEN }}
+          # - app_name: "frontend"
+            # environment: "dev"
+            # region: "us-east-1"
+          # # - app_name: "frontend"
+            # # environment: "prod"
+            # # region: "us-west-2"
+          # # - app_name: "backend"
+            # # environment: "dev"
+            # # region: "us-east-1"
+          # # - app_name: "backend"
+            # # environment: "prod"
+            # # region: "us-west-2"
+        # # Optional: Use exclude to skip specific combinations
+        # # exclude:
+        # #   - app_name: "frontend"
+        # #     environment: "prod"
+        # #     region: "us-west-2"
+      # fail-fast: false  # Continue running other matrix jobs if one fails
+    # steps:
+      # - name: Checkout code
+        # uses: actions/checkout@v4
+
+      # - name: Setup Terraform
+        # uses: hashicorp/setup-terraform@v3
+        # with:
+          # terraform_version: 1.9.5  # Specify your Terraform version
+
+      # # Option 1: Configure AWS Credentials using static keys (less secure)
+      # - name: Configure AWS Credentials
+        # uses: aws-actions/configure-aws-credentials@v4
+        # with:
+          # aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          # aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          # aws-region: ${{ matrix.region }}
+
+      # # Option 2: Configure AWS Credentials using OIDC (more secure, comment out static keys step if using this)
+      # # - name: Configure AWS Credentials (OIDC)
+      # #   uses: aws-actions/configure-aws-credentials@v4
+      # #   with:
+      # #     role-to-assume: arn:aws:iam::YOUR_AWS_ACCOUNT_ID:role/YOUR_ROLE_NAME
+      # #     aws-region: ${{ matrix.region }}
+
+      # - name: Debug Matrix Variables
+        # run: |
+          # echo "Deploying ${APP_NAME} to ${ENVIRONMENT} in ${REGION}"
+        # env:
+          # APP_NAME: ${{ matrix.app_name }}
+          # ENVIRONMENT: ${{ matrix.environment }}
+          # REGION: ${{ matrix.region }}
+
+      # - name: Terraform Init
+        # run: terraform init
+        # env:
+          # TF_LOG: DEBUG  # Enable debug logging for troubleshooting
+
+      # - name: Terraform Plan
+        # run: terraform plan -var="app_name=${{ matrix.app_name }}" -var="environment=${{ matrix.environment }}" -var="aws_region=${{ matrix.region }}" -out=tfplan
+
+      # - name: Terraform Apply
+        # if: github.event_name == 'push'  # Only apply on push, not PR
+        # run: terraform apply -auto-approve tfplan
+        # name: Deploy Multiple Apps
+
+# on: [push]
+
+# jobs:
+  # deploy:
+    # uses: ./.github/workflows/terraform-reusable.yml
+    # strategy:
+      # matrix:
+        # app_name: ["frontend", "backend"]  # List of application names
+        # environment: ["dev"]       # List of environments
+        # region: ["us-east-1"] # List of AWS regions
+        # # include:
+          # # - app_name: app1
+            # # environment: dev
+            # # region: us-east-1
+          # # - app_name: app2
+            # # environment: prod
+            # # region: us-west-1
+        # with:
+          # app_name: ${{ matrix.app_name }}
+          # environment: ${{ matrix.environment }}
+          # region: ${{ matrix.region }}
+      # deploy: true
+    # secrets:
+      # tf_token: ${{ secrets.TERRAFORMAPI_TESTTOKEN }}
