@@ -1,0 +1,22 @@
+name: Deploy to AWS
+on:
+ push:
+   branches:
+	 - main
+
+jobs:
+ deploy:
+   runs-on: ubuntu-latest
+   permissions:
+	 id-token: write
+	 contents: read
+   steps:
+	 - name: Configure AWS Credentials
+	   uses: aws-actions/configure-aws-credentials@v4
+	   with:
+		 role-arn: ${{ secrets.AWS_ROLE_ARN }}
+		 aws-region: us-east-1
+	 - name: Run Terraform
+	   run: |
+		 terraform init
+		 terraform apply -auto-approve

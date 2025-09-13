@@ -1,5 +1,5 @@
 To use OpenID Connect (OIDC) to authorize AWS resources in Terraform, you typically configure an OIDC identity provider to allow an external identity provider (IdP), such as GitHub Actions, to assume an AWS IAM role. This enables secure access to AWS resources without needing long-lived credentials like access keys. Below is a step-by-step guide to set up OIDC with AWS in Terraform, assuming a common use case like GitHub Actions.
-
+https://docs.github.com/en/actions/concepts/security/openid-connect
 ---
 
 ### Steps to Configure OIDC with AWS in Terraform
