@@ -1,0 +1,205 @@
+Below is a complete Terraform configuration to create an AWS EC2 instance, integrated with an OIDC provider for GitHub Actions to authenticate and assume an IAM role. The configuration includes setting up the OIDC identity provider, an IAM role with a trust policy, and the necessary permissions to create and manage an EC2 instance. Additionally, I’ll provide a sample GitHub Actions workflow to apply the Terraform configuration.
+
+---
+
+<xaiArtifact artifact_id="a0e5ecaf-0322-4e1d-a21f-5e5662c5f30c" artifact_version_id="857c6b96-18db-4dee-a0c4-5fc974ead0d2" title="main.tf" contentType="text/x-terraform">
+
+# Configure the AWS provider
+provider "aws" {
+  region = "us-east-1"
+}
+
+# Create the OIDC identity provider for GitHub Actions
+resource "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
+
+  client_id_list = [
+    "sts.amazonaws.com",
+  ]
+
+  thumbprint_list = [
+    "6938fd4d98bab03faadb97b34396831e3780aea1", # GitHub's OIDC thumbprint (as of latest documentation)
+  ]
+}
+
+# Create an IAM role with a trust policy for OIDC
+resource "aws_iam_role" "github_actions_role" {
+  name = "GitHubActionsEC2Role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.github.arn
+        },
+        Action = "sts:AssumeRoleWithWebIdentity",
+        Condition = {
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com",
+            "token.actions.githubusercontent.com:sub" = "repo:your-org/your-repo:ref:refs/heads/main" # Replace with your repo
+          }
+        }
+      }
+    ]
+  })
+}
+
+# Attach a policy to the IAM role for EC2 permissions
+resource "aws_iam_role_policy" "github_actions_ec2_policy" {
+  name = "GitHubActionsEC2Policy"
+  role = aws_iam_role.github_actions_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Action = [
+          "ec2:RunInstances",
+          "ec2:DescribeInstances",
+          "ec2:TerminateInstances",
+          "ec2:CreateTags"
+        ],
+        Resource = "*"
+      },
+      {
+        Effect = "Allow",
+        Action = "iam:PassRole",
+        Resource = aws_iam_role.github_actions_role.arn
+      }
+    ]
+  })
+}
+
+# Create a security group for the EC2 instance
+resource "aws_security_group" "instance_sg" {
+  name        = "ec2-instance-sg"
+  description = "Security group for EC2 instance"
+
+  ingress {
+    from_port   = 22
+    to_port     = 22
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"] # Allow SSH (restrict in production)
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+# Create an EC2 instance
+resource "aws_instance" "example" {
+  ami           = "ami-0c55b159cbfafe1f0" # Amazon Linux 2 AMI (us-east-1, update as needed)
+  instance_type = "t2.micro"
+  security_groups = [aws_security_group.instance_sg.name]
+
+  tags = {
+    Name = "GitHubActionsEC2"
+  }
+}
+
+# Output the IAM role ARN for use in GitHub Actions
+output "role_arn" {
+  value = aws_iam_role.github_actions_role.arn
+}
+
+</xaiArtifact>
+
+---
+
+### Sample GitHub Actions Workflow
+
+Below is a GitHub Actions workflow to apply the Terraform configuration using OIDC authentication.
+
+<xaiArtifact artifact_id="1a830423-7fc7-443a-9ba9-8af593dd6063" artifact_version_id="823c060a-d974-420d-b996-77ac8dabc65f" title=".github/workflows/terraform.yml" contentType="text/yaml">
+
+name: Deploy AWS EC2 with Terraform
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-arn: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: terraform plan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+</xaiArtifact>
+
+---
+
+### Setup Instructions
+
+1. **Replace Placeholders**:
+   - In `main.tf`, replace `your-org/your-repo` with your actual GitHub organization and repository (e.g., `my-org/my-repo`).
+   - Verify the AMI ID (`ami-0c55b159cbfafe1f0`) for your region and update if necessary. You can find the latest Amazon Linux 2 AMI ID in the AWS EC2 console or via the AWS CLI.
+
+2. **Store the IAM Role ARN**:
+   - After running Terraform to create the OIDC provider and IAM role, note the `role_arn` output.
+   - Add this ARN as a GitHub repository secret named `AWS_ROLE_ARN`:
+     - Go to your GitHub repository → Settings → Secrets and variables → Actions → New repository secret.
+
+3. **Directory Structure**:
+   - Place the `main.tf` file in the root of your repository.
+   - Place the GitHub Actions workflow file in `.github/workflows/terraform.yml`.
+
+4. **Run the Workflow**:
+   - Push your code to the `main` branch to trigger the GitHub Actions workflow.
+   - The workflow will:
+     - Check out the code.
+     - Set up Terraform.
+     - Use OIDC to assume the IAM role.
+     - Initialize, plan, and apply the Terraform configuration to create the EC2 instance.
+
+---
+
+### Key Notes
+
+- **Security Group**: The example allows SSH access (`port 22`) from any IP (`0.0.0.0/0`) for simplicity. In production, restrict the `cidr_blocks` to specific IPs for security.
+- **Permissions**: The IAM policy grants permissions to create, describe, and terminate EC2 instances. Adjust the `Resource` field to be more specific if needed (e.g., limit to a specific VPC or instance).
+- **AMI**: The AMI ID is region-specific. Update it based on your AWS region and desired OS.
+- **GitHub OIDC**: The thumbprint (`6938fd4d98bab03faadb97b34396831e3780aea1`) is correct for GitHub as of the latest documentation but verify it in GitHub’s official documentation.
+- **Terraform Version**: The workflow uses Terraform 1.5.0. Update the version in the workflow if you need a different one.
+- **Error Handling**: Ensure the Terraform state is managed appropriately (e.g., use an S3 backend for production).
+
+---
+
+### Best Practices
+
+- **Restrict Permissions**: Use least privilege principles. Limit the IAM role’s permissions to only what’s needed for your use case.
+- **Secure Secrets**: Store sensitive data like the `role_arn` in GitHub Secrets.
+- **State Management**: For production, configure a remote backend (e.g., S3) for Terraform state to avoid storing it in the repository.
+- **Network Security**: Restrict the security group’s ingress rules and consider using a VPC with private subnets.
+- **Monitoring**: Add logging or monitoring to track GitHub Actions runs and Terraform apply operations.
+
+If you need additional configurations (e.g., VPC setup, specific instance types, or a different IdP), let me know, and I can update the code accordingly!
