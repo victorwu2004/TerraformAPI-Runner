@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - gemini_main
 
 # Set permissions for the GitHub token
 permissions:
