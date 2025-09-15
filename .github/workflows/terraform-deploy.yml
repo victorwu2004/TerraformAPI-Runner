@@ -1,0 +1,46 @@
+name: 'Terraform Deploy S3 Bucket'
+
+# Trigger the workflow on pushes to the main branch
+on:
+  push:
+    branches:
+      - main
+
+# Set permissions for the GitHub token
+permissions:
+  id-token: write # Required for OIDC
+  contents: read  # Required to checkout the repository
+
+jobs:
+  terraform-deploy:
+    name: 'Terraform Apply'
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout your repository code
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS Credentials using OIDC
+      # This action exchanges the GitHub OIDC token for temporary AWS credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/github-actions-s3-role # ⚠️ PASTE YOUR ROLE ARN HERE
+          aws-region: us-east-1 # Must match the region in your Terraform files
+
+      # 3. Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # 4. Terraform Init
+      - name: Terraform Init
+        run: terraform init
+
+      # 5. Terraform Plan
+      - name: Terraform Plan
+        run: terraform plan -no-color
+
+      # 6. Terraform Apply
+      - name: Terraform Apply
+        run: terraform apply -auto-approve

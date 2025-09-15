@@ -1,0 +1,211 @@
+Of course. Here's a complete solution for using OIDC to authorize AWS from a GitHub Actions workflow to manage an S3 bucket with Terraform.
+First, run terraform apply manually (or using a separate workflow) on the iam.tf file to create the IAM role.
+
+Get the output value iam_role_arn.
+
+Paste that ARN into the role-to-assume field in your terraform-deploy.yml workflow file.
+
+Now, whenever you push a change to your Terraform files on the main branch, the workflow will automatically and securely apply the changes to your AWS infrastructure.
+
+This method is highly secure because it avoids storing long-lived AWS access keys as GitHub secrets. Instead, your workflow gets temporary credentials automatically.
+
+-----
+
+### How It Works 🤝
+
+The process establishes a trust relationship between your GitHub repository and an AWS IAM Role.
+
+1.  **Trust Setup:** You create an **OIDC Identity Provider** in AWS that trusts GitHub.
+2.  **Role Creation:** You create an **IAM Role** in AWS that trusts the OIDC provider. The role's trust policy specifies which GitHub repository, branch, or user is allowed to assume it.
+3.  **Workflow Run:** When your GitHub workflow runs, it requests a short-lived OIDC token from GitHub.
+4.  **Assume Role:** The workflow presents this token to AWS. AWS validates the token against the OIDC provider and the role's trust policy.
+5.  **Get Credentials:** If everything matches, AWS grants the workflow temporary security credentials with the permissions defined in the IAM Role.
+6.  **Terraform Execution:** Terraform uses these temporary credentials to apply your configuration (e.g., create or update the S3 bucket).
+
+-----
+
+### Step 1: Configure AWS with Terraform
+
+First, you need to create the OIDC provider, the IAM role, and the S3 bucket itself using Terraform. Organize your files as follows.
+
+#### `providers.tf`
+
+This file configures the AWS provider.
+
+```terraform
+terraform {
+  required_providers {
+    aws = {
+      source  = "hashicorp/aws"
+      version = "~> 5.0"
+    }
+  }
+}
+
+provider "aws" {
+  region = "us-east-1" // Specify your desired AWS region
+}
+```
+
+#### `iam.tf`
+
+This is the core of the authentication setup. It creates the OIDC provider and the IAM role that GitHub Actions will assume.
+
+```terraform
+# 1. Create the OIDC Identity Provider for GitHub
+resource "aws_iam_openid_connect_provider" "github" {
+  url = "https://token.actions.githubusercontent.com"
+
+  client_id_list = [
+    "sts.amazonaws.com"
+  ]
+
+  thumbprint_list = ["6938fd4d98bab03faadb97b34396831e3780aea1"] # Use the official thumbprint
+}
+
+# 2. Define the Trust Policy for the IAM Role
+# This policy allows entities from a specific GitHub repo/branch to assume the role.
+data "aws_iam_policy_document" "github_assume_role_policy" {
+  statement {
+    actions = ["sts:AssumeRoleWithWebIdentity"]
+    effect  = "Allow"
+
+    principals {
+      type        = "Federated"
+      identifiers = [aws_iam_openid_connect_provider.github.arn]
+    }
+
+    # Condition: Only allow from your specific repository and main branch
+    # IMPORTANT: Change this to your GitHub username and repository name
+    condition {
+      test     = "StringLike"
+      variable = "token.actions.githubusercontent.com:sub"
+      values   = ["repo:your-github-username/your-repo-name:ref:refs/heads/main"]
+    }
+  }
+}
+
+# 3. Define the Permissions Policy
+# This policy grants the necessary permissions to manage the S3 bucket.
+data "aws_iam_policy_document" "s3_management_policy" {
+  statement {
+    actions = [
+      "s3:ListBucket",
+      "s3:GetObject",
+      "s3:PutObject",
+      "s3:DeleteObject"
+    ]
+    resources = [
+      aws_s3_bucket.my_app_bucket.arn,
+      "${aws_s3_bucket.my_app_bucket.arn}/*",
+    ]
+  }
+}
+
+# 4. Create the IAM Role and attach the policies
+resource "aws_iam_role" "github_actions_role" {
+  name               = "github-actions-s3-role"
+  assume_role_policy = data.aws_iam_policy_document.github_assume_role_policy.json
+}
+
+resource "aws_iam_policy" "s3_policy" {
+  name   = "s3-management-policy"
+  policy = data.aws_iam_policy_document.s3_management_policy.json
+}
+
+resource "aws_iam_role_policy_attachment" "s3_policy_attachment" {
+  role       = aws_iam_role.github_actions_role.name
+  policy_arn = aws_iam_policy.s3_policy.arn
+}
+
+# Output the Role ARN to use it in the GitHub workflow
+output "iam_role_arn" {
+  value       = aws_iam_role.github_actions_role.arn
+  description = "The ARN of the IAM role for GitHub Actions."
+}
+```
+
+**Important:** You must replace **`your-github-username/your-repo-name`** with your actual GitHub username and repository name.
+
+#### `s3.tf`
+
+This file defines the S3 bucket you want to manage.
+
+```terraform
+resource "aws_s3_bucket" "my_app_bucket" {
+  # Bucket names must be globally unique
+  bucket = "my-unique-terraform-oidc-bucket-12345"
+
+  tags = {
+    Name        = "My Terraform OIDC Bucket"
+    Environment = "Dev"
+  }
+}
+```
+
+-----
+
+### Step 2: Create the GitHub Actions Workflow
+
+In your GitHub repository, create a directory `.github/workflows` and add the following file.
+
+#### `.github/workflows/terraform-deploy.yml`
+
+This workflow file will trigger on a push to the `main` branch, configure AWS credentials via OIDC, and then run Terraform.
+
+```yaml
+name: 'Terraform Deploy S3 Bucket'
+
+# Trigger the workflow on pushes to the main branch
+on:
+  push:
+    branches:
+      - main
+
+# Set permissions for the GitHub token
+permissions:
+  id-token: write # Required for OIDC
+  contents: read  # Required to checkout the repository
+
+jobs:
+  terraform-deploy:
+    name: 'Terraform Apply'
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout your repository code
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Configure AWS Credentials using OIDC
+      # This action exchanges the GitHub OIDC token for temporary AWS credentials
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::123456789012:role/github-actions-s3-role # ⚠️ PASTE YOUR ROLE ARN HERE
+          aws-region: us-east-1 # Must match the region in your Terraform files
+
+      # 3. Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # 4. Terraform Init
+      - name: Terraform Init
+        run: terraform init
+
+      # 5. Terraform Plan
+      - name: Terraform Plan
+        run: terraform plan -no-color
+
+      # 6. Terraform Apply
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
+```
+
+**⚠️ Action Required:**
+
+1.  First, run `terraform apply` manually (or using a separate workflow) on the `iam.tf` file to create the IAM role.
+2.  Get the output value `iam_role_arn`.
+3.  Paste that ARN into the `role-to-assume` field in your `terraform-deploy.yml` workflow file.
+
+Now, whenever you push a change to your Terraform files on the `main` branch, the workflow will automatically and securely apply the changes to your AWS infrastructure.
